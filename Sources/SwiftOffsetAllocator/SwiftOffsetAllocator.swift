@@ -30,18 +30,45 @@ public struct FullStorageReport {
 
 public class Allocator {
     struct Node {
+        static let isUsedBitShift = 31
+        static let isUsedMask: UInt32 = 1 << isUsedBitShift
+        static let dataSizeMask = ~isUsedMask
+        
         var dataOffset: UInt32 = 0
-        var dataSize: UInt32 = 0
+        var dataSize: UInt32 {
+            get {
+                dataSizeSharedStorage & Self.dataSizeMask
+            }
+            
+            set {
+                let newValueBits = newValue & Self.dataSizeMask
+                let isUsedBits = dataSizeSharedStorage & Self.isUsedMask
+                
+                dataSizeSharedStorage = isUsedBits | newValueBits
+            }
+        }
+        var isUsed: Bool {
+            get {
+                dataSizeSharedStorage >> Self.isUsedBitShift == 1
+            }
+            
+            set {
+                let newValueBits = (newValue ? UInt32(1) : UInt32(0)) << Self.isUsedBitShift
+                let dataSizeBits = dataSizeSharedStorage & Self.dataSizeMask
+                
+                dataSizeSharedStorage = newValueBits | dataSizeBits
+            }
+        }
+        var isNotUsed: Bool {
+            !isUsed
+        }
         var binListPrev: NodeIndex = .max
         var binListNext: NodeIndex = .max
         var neighborPrev: NodeIndex = .max
         var neighborNext: NodeIndex = .max
-        var used: Bool = false
-        
         private var dataSizeSharedStorage: UInt32 = 0
         
-        init() {
-        }
+        init() {}
         
         init(dataOffset: UInt32, dataSize: UInt32, binListNext: UInt32) {
             self.dataOffset = dataOffset
@@ -133,7 +160,7 @@ public class Allocator {
         
         let nodeTotalSize = pNode.pointee.dataSize
         pNode.pointee.dataSize = size
-        pNode.pointee.used = true
+        pNode.pointee.isUsed = true
         binIndices[Int(binIndex)] = pNode.pointee.binListNext
         if pNode.pointee.binListNext != .max {
             nodes[Int(pNode.pointee.binListNext)].binListPrev = .max
@@ -166,12 +193,12 @@ public class Allocator {
         let nodeIndex = allocation.metadata
         
         let pNode = nodes.advanced(by: Int(nodeIndex))
-        assert(pNode.pointee.used)
+        assert(pNode.pointee.isUsed)
         
         var offset = pNode.pointee.dataOffset
         var size = pNode.pointee.dataSize
                             
-        if (pNode.pointee.neighborPrev != .max) && (nodes[Int(pNode.pointee.neighborPrev)].used == false) {
+        if (pNode.pointee.neighborPrev != .max) && (nodes[Int(pNode.pointee.neighborPrev)].isNotUsed) {
             let prevNode = nodes[Int(pNode.pointee.neighborPrev)]
             offset = prevNode.dataOffset
             size += prevNode.dataSize
@@ -182,7 +209,7 @@ public class Allocator {
             pNode.pointee.neighborPrev = prevNode.neighborPrev
         }
         
-        if (pNode.pointee.neighborNext != .max) && (nodes[Int(pNode.pointee.neighborNext)].used == false) {
+        if (pNode.pointee.neighborNext != .max) && (nodes[Int(pNode.pointee.neighborNext)].isNotUsed) {
             let nextNode = nodes[Int(pNode.pointee.neighborNext)]
             size += nextNode.dataSize
             

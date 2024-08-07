@@ -56,6 +56,13 @@ class SmallFloatTests: XCTestCase {
 }
 
 class OffsetAllocatorTests: XCTestCase {
+    func testAllocatorNodeBitPacking() {
+        for i in 0..<31 {
+            let dataSize = UInt32(1 << i)
+            let node = Allocator.Node(dataOffset: 0, dataSize: dataSize, binListNext: 0)
+            XCTAssertEqual(dataSize, node.dataSize)
+        }
+    }
     
     func testBasic() {
         let allocator = Allocator(size: 1024 * 1024 * 256)
