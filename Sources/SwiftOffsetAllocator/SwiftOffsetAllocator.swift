@@ -15,8 +15,8 @@ public struct Allocation {
 }
 
 public struct StorageReport {
-    let totalFreeSpace: UInt32
-    let largestFreeRegion: UInt32
+    public let totalFreeSpace: UInt32
+    public let largestFreeRegion: UInt32
 }
 
 public struct FullStorageReport {
@@ -125,8 +125,10 @@ public class Allocator {
         nodes.deallocate()
     }
     
-    func allocate(size: UInt32) -> Allocation? {
+    public func allocate(size: Int) -> Allocation? {
         precondition(size >= 0)
+        let size = UInt32(size)
+        precondition(size <= Node.dataSizeMask)
         
         if freeOffset == 0 {
             return nil
@@ -150,7 +152,7 @@ public class Allocator {
                 return nil
             }
 
-            leafBinIndex = tzcnt_nonzero(UInt32(usedBins[Int(topBinIndex)]))
+            leafBinIndex = tzcntNonZero(UInt32(usedBins[Int(topBinIndex)]))
         }
         
         let binIndex = (topBinIndex << topBinsIndexShift) | leafBinIndex
@@ -189,7 +191,7 @@ public class Allocator {
         return Allocation(offset: Int(pNode.pointee.dataOffset), metadata: nodeIndex)
     }
     
-    func free(allocation: Allocation) {
+    public func free(allocation: Allocation) {
         let nodeIndex = allocation.metadata
         
         let pNode = nodes.advanced(by: Int(nodeIndex))
@@ -306,8 +308,8 @@ public class Allocator {
         if freeOffset > 0 {
             freeStorage = self.freeStorage
             if usedBinsTop != 0 {
-                let topBinIndex = 31 - lzcnt_nonzero(usedBinsTop)
-                let leafBinIndex = 31 - lzcnt_nonzero(UInt32(usedBins[Int(topBinIndex)]))
+                let topBinIndex = 31 - lzcntNonZero(usedBinsTop)
+                let leafBinIndex = 31 - lzcntNonZero(UInt32(usedBins[Int(topBinIndex)]))
                 largestFreeRegion = SmallFloat.floatToUint((topBinIndex << topBinsIndexShift) | leafBinIndex)
                 assert(freeStorage >= largestFreeRegion)
             }
@@ -332,7 +334,7 @@ public class Allocator {
     }
 }
 
-func lzcnt_nonzero(_ v: UInt32) -> UInt32 {
+func lzcntNonZero(_ v: UInt32) -> UInt32 {
 #if os(Windows)
     var retVal: UInt32 = 0
     _BitScanReverse(&retVal, v)
@@ -342,7 +344,7 @@ func lzcnt_nonzero(_ v: UInt32) -> UInt32 {
 #endif
 }
 
-func tzcnt_nonzero(_ v: UInt32) -> UInt32 {
+func tzcntNonZero(_ v: UInt32) -> UInt32 {
 #if os(Windows)
     var retVal: UInt32 = 0
     _BitScanForward(&retVal, v)
@@ -364,7 +366,7 @@ enum SmallFloat {
         if size < mantissaValue {
             mantissa = size
         } else {
-            let leadingZeros = lzcnt_nonzero(size)
+            let leadingZeros = lzcntNonZero(size)
             let highestSetBit = 31 - leadingZeros
             
             let mantissaStartBit = highestSetBit - mantissaBits
@@ -388,7 +390,7 @@ enum SmallFloat {
         if size < mantissaValue {
             mantissa = size
         } else {
-            let leadingZeros = lzcnt_nonzero(size)
+            let leadingZeros = lzcntNonZero(size)
             let highestSetBit = 31 - leadingZeros
             
             let mantissaStartBit = highestSetBit - mantissaBits
@@ -415,5 +417,5 @@ func findLowestSetBitAfter(bitMask: UInt32, startBitIndex: UInt32) -> UInt32 {
     let maskAfterStartIndex = ~maskBeforeStartIndex
     let bitsAfter = bitMask & maskAfterStartIndex
     if bitsAfter == 0 { return .max }
-    return tzcnt_nonzero(bitsAfter)
+    return tzcntNonZero(bitsAfter)
 }

@@ -59,8 +59,12 @@ class OffsetAllocatorTests: XCTestCase {
     func testAllocatorNodeBitPacking() {
         for i in 0..<31 {
             let dataSize = UInt32(1 << i)
-            let node = Allocator.Node(dataOffset: 0, dataSize: dataSize, binListNext: 0)
-            XCTAssertEqual(dataSize, node.dataSize)
+            var node = Allocator.Node(dataOffset: 0, dataSize: dataSize, binListNext: 0)
+            XCTAssertEqual(node.dataSize, dataSize)
+            XCTAssertEqual(node.isUsed, false)
+            node.isUsed = true
+            XCTAssertEqual(node.isUsed, true)
+            XCTAssertEqual(node.dataSize, dataSize)
         }
     }
     
