@@ -23,16 +23,16 @@ public struct StorageReport {
     let largestFreeRegion: UInt32
 }
 
-struct StorageReportFull {
-    struct Region {
-        var size: UInt32
-        var count: UInt32
+public struct FullStorageReport {
+    public struct Region {
+        public let size: UInt32
+        public let count: UInt32
     }
     
-    var freeRegions: [Region] = Array(repeating: Region(size: 0, count: 0), count: Int(leafBinsCount))
+    public let freeRegions: [Region]
 }
 
-class Allocator {
+public class Allocator {
     struct Node {
         static let unused: NodeIndex = 0xffffffff
         
@@ -47,15 +47,15 @@ class Allocator {
     
     private var size: UInt32
     private var maxAllocationCount: UInt32
-    private var m_freeStorage: UInt32 = 0
+    private var freeStorage: UInt32 = 0
 
-    private var m_usedBinsTop: UInt32 = 0
-    private var m_usedBins: [UInt8] = Array(repeating: 0, count: Int(topBinCount))
-    private var m_binIndices: [NodeIndex] = Array(repeating: Node.unused, count: Int(leafBinsCount))
+    private var usedBinsTop: UInt32 = 0
+    private var usedBins: [UInt8] = Array(repeating: 0, count: Int(topBinCount))
+    private var binIndices: [NodeIndex] = Array(repeating: Node.unused, count: Int(leafBinsCount))
                 
-    private var m_nodes: UnsafeMutablePointer<Node>
-    private var m_freeNodes: [NodeIndex] = []
-    private var m_freeOffset: UInt32 = 0
+    private var nodes: UnsafeMutablePointer<Node>
+    private var freeNodes: [NodeIndex] = []
+    private var freeOffset: UInt32 = 0
 
     public init(size: Int, maxAllocationCount: Int = 128 * 1024) {
         precondition(size > 0)
@@ -65,39 +65,38 @@ class Allocator {
         self.size = UInt32(size)
         self.maxAllocationCount = UInt32(maxAllocationCount)
         
-        m_nodes = .allocate(capacity: Int(maxAllocationCount))
-        m_nodes.initialize(repeating: Node(), count: Int(maxAllocationCount))
+        nodes = .allocate(capacity: Int(maxAllocationCount))
+        nodes.initialize(repeating: Node(), count: maxAllocationCount)
         
-        m_freeStorage = 0
-        m_usedBinsTop = 0
-        m_freeOffset = UInt32(maxAllocationCount - 1)
+        freeStorage = 0
+        usedBinsTop = 0
+        freeOffset = UInt32(maxAllocationCount - 1)
 
         for i in 0..<Int(topBinCount) {
-            m_usedBins[i] = 0
+            usedBins[i] = 0
         }
         
         for i in 0..<Int(leafBinsCount) {
-            m_binIndices[i] = Node.unused
+            binIndices[i] = Node.unused
         }
         
-        //m_nodes = [Node](repeating: Node(), count: Int(m_maxAllocationCount))
-        m_freeNodes = [NodeIndex](repeating: 0, count: Int(maxAllocationCount))
+        freeNodes = [NodeIndex](repeating: 0, count: maxAllocationCount)
         
         for i in 0..<Int(maxAllocationCount) {
-            m_freeNodes[i] = UInt32(maxAllocationCount) - UInt32(i) - 1
+            freeNodes[i] = UInt32(maxAllocationCount) - UInt32(i) - 1
         }
         
         _ = insertNodeIntoBin(size: UInt32(size), dataOffset: 0)
     }
     
     deinit {
-        m_nodes.deallocate()
+        nodes.deallocate()
     }
     
     func allocate(size: UInt32) -> Allocation? {
         precondition(size >= 0)
         
-        if m_freeOffset == 0 {
+        if freeOffset == 0 {
             return nil
         }
         
@@ -108,38 +107,38 @@ class Allocator {
         var topBinIndex = minTopBinIndex
         var leafBinIndex: UInt32 = .max
         
-        if (m_usedBinsTop & (1 << topBinIndex)) != 0 {
-            leafBinIndex = findLowestSetBitAfter(bitMask: UInt32(m_usedBins[Int(topBinIndex)]), startBitIndex: minLeafBinIndex)
+        if (usedBinsTop & (1 << topBinIndex)) != 0 {
+            leafBinIndex = findLowestSetBitAfter(bitMask: UInt32(usedBins[Int(topBinIndex)]), startBitIndex: minLeafBinIndex)
         }
     
         if leafBinIndex == .max {
-            topBinIndex = findLowestSetBitAfter(bitMask: m_usedBinsTop, startBitIndex: minTopBinIndex + 1)
+            topBinIndex = findLowestSetBitAfter(bitMask: usedBinsTop, startBitIndex: minTopBinIndex + 1)
             
             if topBinIndex == .max {
                 return nil
             }
 
-            leafBinIndex = tzcnt_nonzero(UInt32(m_usedBins[Int(topBinIndex)]))
+            leafBinIndex = tzcnt_nonzero(UInt32(usedBins[Int(topBinIndex)]))
         }
         
         let binIndex = (topBinIndex << topBinsIndexShift) | leafBinIndex
-        let nodeIndex = m_binIndices[Int(binIndex)]
+        let nodeIndex = binIndices[Int(binIndex)]
         
-        let pNode = m_nodes.advanced(by: Int(nodeIndex))
+        let pNode = nodes.advanced(by: Int(nodeIndex))
         
         let nodeTotalSize = pNode.pointee.dataSize
         pNode.pointee.dataSize = size
         pNode.pointee.used = true
-        m_binIndices[Int(binIndex)] = pNode.pointee.binListNext
+        binIndices[Int(binIndex)] = pNode.pointee.binListNext
         if pNode.pointee.binListNext != Node.unused {
-            m_nodes[Int(pNode.pointee.binListNext)].binListPrev = Node.unused
+            nodes[Int(pNode.pointee.binListNext)].binListPrev = Node.unused
         }
-        m_freeStorage -= nodeTotalSize
+        freeStorage -= nodeTotalSize
         
-        if m_binIndices[Int(binIndex)] == Node.unused {
-            m_usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
-            if m_usedBins[Int(topBinIndex)] == 0 {
-                m_usedBinsTop &= ~(1 << topBinIndex)
+        if binIndices[Int(binIndex)] == Node.unused {
+            usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
+            if usedBins[Int(topBinIndex)] == 0 {
+                usedBinsTop &= ~(1 << topBinIndex)
             }
         }
         
@@ -148,10 +147,10 @@ class Allocator {
             let newNodeIndex = insertNodeIntoBin(size: reminderSize, dataOffset: pNode.pointee.dataOffset + size)
             
             if pNode.pointee.neighborNext != Node.unused {
-                m_nodes[Int(pNode.pointee.neighborNext)].neighborPrev = newNodeIndex
+                nodes[Int(pNode.pointee.neighborNext)].neighborPrev = newNodeIndex
             }
-            m_nodes[Int(newNodeIndex)].neighborPrev = nodeIndex
-            m_nodes[Int(newNodeIndex)].neighborNext = pNode.pointee.neighborNext
+            nodes[Int(newNodeIndex)].neighborPrev = nodeIndex
+            nodes[Int(newNodeIndex)].neighborNext = pNode.pointee.neighborNext
             pNode.pointee.neighborNext = newNodeIndex
         }
                 
@@ -161,14 +160,14 @@ class Allocator {
     func free(allocation: Allocation) {
         let nodeIndex = allocation.metadata
         
-        let pNode = m_nodes.advanced(by: Int(nodeIndex))
+        let pNode = nodes.advanced(by: Int(nodeIndex))
         assert(pNode.pointee.used)
         
         var offset = pNode.pointee.dataOffset
         var size = pNode.pointee.dataSize
                             
-        if (pNode.pointee.neighborPrev != Node.unused) && (m_nodes[Int(pNode.pointee.neighborPrev)].used == false) {
-            let prevNode = m_nodes[Int(pNode.pointee.neighborPrev)]
+        if (pNode.pointee.neighborPrev != Node.unused) && (nodes[Int(pNode.pointee.neighborPrev)].used == false) {
+            let prevNode = nodes[Int(pNode.pointee.neighborPrev)]
             offset = prevNode.dataOffset
             size += prevNode.dataSize
             
@@ -178,8 +177,8 @@ class Allocator {
             pNode.pointee.neighborPrev = prevNode.neighborPrev
         }
         
-        if (pNode.pointee.neighborNext != Node.unused) && (m_nodes[Int(pNode.pointee.neighborNext)].used == false) {
-            let nextNode = m_nodes[Int(pNode.pointee.neighborNext)]
+        if (pNode.pointee.neighborNext != Node.unused) && (nodes[Int(pNode.pointee.neighborNext)].used == false) {
+            let nextNode = nodes[Int(pNode.pointee.neighborNext)]
             size += nextNode.dataSize
             
             removeNodeFromBin(nodeIndex: pNode.pointee.neighborNext)
@@ -191,18 +190,18 @@ class Allocator {
         let neighborNext = pNode.pointee.neighborNext
         let neighborPrev = pNode.pointee.neighborPrev
         
-        m_freeOffset += 1
-        m_freeNodes[Int(m_freeOffset)] = nodeIndex
+        freeOffset += 1
+        freeNodes[Int(freeOffset)] = nodeIndex
 
         let combinedNodeIndex = insertNodeIntoBin(size: size, dataOffset: offset)
 
         if neighborNext != Node.unused {
-            m_nodes[Int(combinedNodeIndex)].neighborNext = neighborNext
-            m_nodes[Int(neighborNext)].neighborPrev = combinedNodeIndex
+            nodes[Int(combinedNodeIndex)].neighborNext = neighborNext
+            nodes[Int(neighborNext)].neighborPrev = combinedNodeIndex
         }
         if neighborPrev != Node.unused {
-            m_nodes[Int(combinedNodeIndex)].neighborPrev = neighborPrev
-            m_nodes[Int(neighborPrev)].neighborNext = combinedNodeIndex
+            nodes[Int(combinedNodeIndex)].neighborPrev = neighborPrev
+            nodes[Int(neighborPrev)].neighborNext = combinedNodeIndex
         }
     }
 
@@ -211,72 +210,72 @@ class Allocator {
         let topBinIndex = binIndex >> topBinsIndexShift
         let leafBinIndex = binIndex & leafBinsIndexMask
         
-        if m_binIndices[Int(binIndex)] == Node.unused {
-            m_usedBins[Int(topBinIndex)] |= 1 << leafBinIndex
-            m_usedBinsTop |= 1 << topBinIndex
+        if binIndices[Int(binIndex)] == Node.unused {
+            usedBins[Int(topBinIndex)] |= 1 << leafBinIndex
+            usedBinsTop |= 1 << topBinIndex
         }
         
-        let topNodeIndex = m_binIndices[Int(binIndex)]
-        let nodeIndex = m_freeNodes[Int(m_freeOffset)]
-        m_freeOffset -= 1
+        let topNodeIndex = binIndices[Int(binIndex)]
+        let nodeIndex = freeNodes[Int(freeOffset)]
+        freeOffset -= 1
                 
-        m_nodes[Int(nodeIndex)] = Node(dataOffset: dataOffset, dataSize: size, binListNext: topNodeIndex)
+        nodes[Int(nodeIndex)] = Node(dataOffset: dataOffset, dataSize: size, binListNext: topNodeIndex)
         
         if topNodeIndex != Node.unused {
-            m_nodes[Int(topNodeIndex)].binListPrev = nodeIndex
+            nodes[Int(topNodeIndex)].binListPrev = nodeIndex
         }
-        m_binIndices[Int(binIndex)] = nodeIndex
+        binIndices[Int(binIndex)] = nodeIndex
         
-        m_freeStorage += size
+        freeStorage += size
         
         return nodeIndex
     }
     
     private func removeNodeFromBin(nodeIndex: NodeIndex) {
-        let node = m_nodes[Int(nodeIndex)]
+        let node = nodes[Int(nodeIndex)]
         
         if node.binListPrev != Node.unused {
-            m_nodes[Int(node.binListPrev)].binListNext = node.binListNext
+            nodes[Int(node.binListPrev)].binListNext = node.binListNext
             if node.binListNext != Node.unused {
-                m_nodes[Int(node.binListNext)].binListPrev = node.binListPrev
+                nodes[Int(node.binListNext)].binListPrev = node.binListPrev
             }
         } else {
             let binIndex = SmallFloat.uintToFloatRoundDown(node.dataSize)
             let topBinIndex = binIndex >> topBinsIndexShift
             let leafBinIndex = binIndex & leafBinsIndexMask
             
-            m_binIndices[Int(binIndex)] = node.binListNext
+            binIndices[Int(binIndex)] = node.binListNext
             if node.binListNext != Node.unused {
-                m_nodes[Int(node.binListNext)].binListPrev = Node.unused
+                nodes[Int(node.binListNext)].binListPrev = Node.unused
             }
 
-            if m_binIndices[Int(binIndex)] == Node.unused {
-                m_usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
-                if m_usedBins[Int(topBinIndex)] == 0 {
-                    m_usedBinsTop &= ~(1 << topBinIndex)
+            if binIndices[Int(binIndex)] == Node.unused {
+                usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
+                if usedBins[Int(topBinIndex)] == 0 {
+                    usedBinsTop &= ~(1 << topBinIndex)
                 }
             }
         }
         
-        m_freeOffset += 1
-        m_freeNodes[Int(m_freeOffset)] = nodeIndex
+        freeOffset += 1
+        freeNodes[Int(freeOffset)] = nodeIndex
 
-        m_freeStorage -= node.dataSize
+        freeStorage -= node.dataSize
     }
 
     func allocationSize(allocation: Allocation) -> UInt32 {
-        return m_nodes[Int(allocation.metadata)].dataSize
+        return nodes[Int(allocation.metadata)].dataSize
     }
 
-    func storageReport() -> StorageReport {
+    public func makeStorageReport() -> StorageReport {
         var largestFreeRegion: UInt32 = 0
         var freeStorage: UInt32 = 0
         
-        if m_freeOffset > 0 {
-            freeStorage = m_freeStorage
-            if m_usedBinsTop != 0 {
-                let topBinIndex = 31 - lzcnt_nonzero(m_usedBinsTop)
-                let leafBinIndex = 31 - lzcnt_nonzero(UInt32(m_usedBins[Int(topBinIndex)]))
+        if freeOffset > 0 {
+            freeStorage = self.freeStorage
+            if usedBinsTop != 0 {
+                let topBinIndex = 31 - lzcnt_nonzero(usedBinsTop)
+                let leafBinIndex = 31 - lzcnt_nonzero(UInt32(usedBins[Int(topBinIndex)]))
                 largestFreeRegion = SmallFloat.floatToUint((topBinIndex << topBinsIndexShift) | leafBinIndex)
                 assert(freeStorage >= largestFreeRegion)
             }
@@ -285,18 +284,19 @@ class Allocator {
         return StorageReport(totalFreeSpace: freeStorage, largestFreeRegion: largestFreeRegion)
     }
 
-    func storageReportFull() -> StorageReportFull {
-        var report = StorageReportFull()
-        for i in 0..<Int(leafBinsCount) {
+    public func makeFullStorageReport() -> FullStorageReport {
+        let regions = (0..<Int(leafBinsCount)).map { i in
             var count: UInt32 = 0
-            var nodeIndex = m_binIndices[i]
+            var nodeIndex = binIndices[i]
             while nodeIndex != Node.unused {
-                nodeIndex = m_nodes[Int(nodeIndex)].binListNext
+                nodeIndex = nodes[Int(nodeIndex)].binListNext
                 count += 1
             }
-            report.freeRegions[i] = StorageReportFull.Region(size: SmallFloat.floatToUint(UInt32(i)), count: count)
+            
+            return FullStorageReport.Region(size: SmallFloat.floatToUint(UInt32(i)), count: count)
         }
-        return report
+                
+        return FullStorageReport(freeRegions: regions)
     }
 }
 

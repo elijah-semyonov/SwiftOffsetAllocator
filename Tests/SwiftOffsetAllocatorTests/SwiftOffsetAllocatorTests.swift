@@ -143,7 +143,7 @@ class OffsetAllocatorTests: XCTestCase {
             let e = allocator.allocate(size: 512)!
             XCTAssertEqual(e.offset, 456)
                         
-            let report = allocator.storageReport()
+            let report = allocator.makeStorageReport()
             let expected: UInt32 = 1024 * 1024 * 256 - 3456 - 2345 - 456 - 512
             XCTAssertEqual(report.totalFreeSpace, expected)
             XCTAssertNotEqual(report.largestFreeRegion, report.totalFreeSpace)
@@ -165,7 +165,7 @@ class OffsetAllocatorTests: XCTestCase {
                 return allocation
             }
             
-            var report = allocator.storageReport()
+            var report = allocator.makeStorageReport()
             XCTAssertEqual(report.totalFreeSpace, 0)
             XCTAssertEqual(report.largestFreeRegion, 0)
             
@@ -191,7 +191,7 @@ class OffsetAllocatorTests: XCTestCase {
                 }
             }
             
-            report = allocator.storageReport()
+            report = allocator.makeStorageReport()
             XCTAssertEqual(report.totalFreeSpace, 1024 * 1024 * 256)
             XCTAssertEqual(report.largestFreeRegion, 1024 * 1024 * 256)
             
