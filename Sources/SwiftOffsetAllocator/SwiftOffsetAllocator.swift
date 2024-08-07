@@ -45,8 +45,8 @@ class Allocator {
         var used: Bool = false // TODO: Merge as bit flag
     }
     
-    private var m_size: UInt32
-    private var m_maxAllocs: UInt32
+    private var size: UInt32
+    private var maxAllocationCount: UInt32
     private var m_freeStorage: UInt32 = 0
 
     private var m_usedBinsTop: UInt32 = 0
@@ -57,16 +57,20 @@ class Allocator {
     private var m_freeNodes: [NodeIndex] = []
     private var m_freeOffset: UInt32 = 0
 
-    init(size: UInt32, maxAllocs: UInt32 = 128 * 1024) {
-        self.m_size = size
-        self.m_maxAllocs = maxAllocs
+    public init(size: Int, maxAllocationCount: Int = 128 * 1024) {
+        precondition(size > 0)
+        precondition(maxAllocationCount > 0)
+        precondition(maxAllocationCount <= size)
         
-        m_nodes = .allocate(capacity: Int(m_maxAllocs))
-        m_nodes.initialize(repeating: Node(), count: Int(m_maxAllocs))
+        self.size = UInt32(size)
+        self.maxAllocationCount = UInt32(maxAllocationCount)
+        
+        m_nodes = .allocate(capacity: Int(maxAllocationCount))
+        m_nodes.initialize(repeating: Node(), count: Int(maxAllocationCount))
         
         m_freeStorage = 0
         m_usedBinsTop = 0
-        m_freeOffset = m_maxAllocs - 1
+        m_freeOffset = UInt32(maxAllocationCount - 1)
 
         for i in 0..<Int(topBinCount) {
             m_usedBins[i] = 0
@@ -76,17 +80,23 @@ class Allocator {
             m_binIndices[i] = Node.unused
         }
         
-        //m_nodes = [Node](repeating: Node(), count: Int(m_maxAllocs))
-        m_freeNodes = [NodeIndex](repeating: 0, count: Int(m_maxAllocs))
+        //m_nodes = [Node](repeating: Node(), count: Int(m_maxAllocationCount))
+        m_freeNodes = [NodeIndex](repeating: 0, count: Int(maxAllocationCount))
         
-        for i in 0..<Int(m_maxAllocs) {
-            m_freeNodes[i] = m_maxAllocs - UInt32(i) - 1
+        for i in 0..<Int(maxAllocationCount) {
+            m_freeNodes[i] = UInt32(maxAllocationCount) - UInt32(i) - 1
         }
         
-        _ = insertNodeIntoBin(size: m_size, dataOffset: 0)
+        _ = insertNodeIntoBin(size: UInt32(size), dataOffset: 0)
+    }
+    
+    deinit {
+        m_nodes.deallocate()
     }
     
     func allocate(size: UInt32) -> Allocation? {
+        precondition(size >= 0)
+        
         if m_freeOffset == 0 {
             return nil
         }
