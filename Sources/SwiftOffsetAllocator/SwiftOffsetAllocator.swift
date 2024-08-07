@@ -1,11 +1,7 @@
 // The Swift Programming Language
 // https://docs.swift.org/swift-book
 
-#if USE_16_BIT_NODE_INDICES
-    typealias NodeIndex = UInt16
-#else
-    typealias NodeIndex = UInt32
-#endif
+typealias NodeIndex = UInt32
 
 let topBinCount: UInt32 = 32
 let binPerLeafCount: UInt32 = 8
@@ -34,15 +30,24 @@ public struct FullStorageReport {
 
 public class Allocator {
     struct Node {
-        static let unused: NodeIndex = 0xffffffff
-        
         var dataOffset: UInt32 = 0
         var dataSize: UInt32 = 0
-        var binListPrev: NodeIndex = Node.unused
-        var binListNext: NodeIndex = Node.unused
-        var neighborPrev: NodeIndex = Node.unused
-        var neighborNext: NodeIndex = Node.unused
-        var used: Bool = false // TODO: Merge as bit flag
+        var binListPrev: NodeIndex = .max
+        var binListNext: NodeIndex = .max
+        var neighborPrev: NodeIndex = .max
+        var neighborNext: NodeIndex = .max
+        var used: Bool = false
+        
+        private var dataSizeSharedStorage: UInt32 = 0
+        
+        init() {
+        }
+        
+        init(dataOffset: UInt32, dataSize: UInt32, binListNext: UInt32) {
+            self.dataOffset = dataOffset
+            self.dataSize = dataSize
+            self.binListNext = binListNext
+        }
     }
     
     private var size: UInt32
@@ -51,7 +56,7 @@ public class Allocator {
 
     private var usedBinsTop: UInt32 = 0
     private var usedBins: [UInt8] = Array(repeating: 0, count: Int(topBinCount))
-    private var binIndices: [NodeIndex] = Array(repeating: Node.unused, count: Int(leafBinsCount))
+    private var binIndices: [NodeIndex] = Array(repeating: .max, count: Int(leafBinsCount))
                 
     private var nodes: UnsafeMutablePointer<Node>
     private var freeNodes: [NodeIndex] = []
@@ -77,7 +82,7 @@ public class Allocator {
         }
         
         for i in 0..<Int(leafBinsCount) {
-            binIndices[i] = Node.unused
+            binIndices[i] = .max
         }
         
         freeNodes = [NodeIndex](repeating: 0, count: maxAllocationCount)
@@ -130,12 +135,12 @@ public class Allocator {
         pNode.pointee.dataSize = size
         pNode.pointee.used = true
         binIndices[Int(binIndex)] = pNode.pointee.binListNext
-        if pNode.pointee.binListNext != Node.unused {
-            nodes[Int(pNode.pointee.binListNext)].binListPrev = Node.unused
+        if pNode.pointee.binListNext != .max {
+            nodes[Int(pNode.pointee.binListNext)].binListPrev = .max
         }
         freeStorage -= nodeTotalSize
         
-        if binIndices[Int(binIndex)] == Node.unused {
+        if binIndices[Int(binIndex)] == .max {
             usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
             if usedBins[Int(topBinIndex)] == 0 {
                 usedBinsTop &= ~(1 << topBinIndex)
@@ -146,7 +151,7 @@ public class Allocator {
         if reminderSize > 0 {
             let newNodeIndex = insertNodeIntoBin(size: reminderSize, dataOffset: pNode.pointee.dataOffset + size)
             
-            if pNode.pointee.neighborNext != Node.unused {
+            if pNode.pointee.neighborNext != .max {
                 nodes[Int(pNode.pointee.neighborNext)].neighborPrev = newNodeIndex
             }
             nodes[Int(newNodeIndex)].neighborPrev = nodeIndex
@@ -166,22 +171,22 @@ public class Allocator {
         var offset = pNode.pointee.dataOffset
         var size = pNode.pointee.dataSize
                             
-        if (pNode.pointee.neighborPrev != Node.unused) && (nodes[Int(pNode.pointee.neighborPrev)].used == false) {
+        if (pNode.pointee.neighborPrev != .max) && (nodes[Int(pNode.pointee.neighborPrev)].used == false) {
             let prevNode = nodes[Int(pNode.pointee.neighborPrev)]
             offset = prevNode.dataOffset
             size += prevNode.dataSize
             
-            removeNodeFromBin(nodeIndex: pNode.pointee.neighborPrev)
+            removeNodeFromBin(at: pNode.pointee.neighborPrev)
             
             assert(prevNode.neighborNext == nodeIndex)
             pNode.pointee.neighborPrev = prevNode.neighborPrev
         }
         
-        if (pNode.pointee.neighborNext != Node.unused) && (nodes[Int(pNode.pointee.neighborNext)].used == false) {
+        if (pNode.pointee.neighborNext != .max) && (nodes[Int(pNode.pointee.neighborNext)].used == false) {
             let nextNode = nodes[Int(pNode.pointee.neighborNext)]
             size += nextNode.dataSize
             
-            removeNodeFromBin(nodeIndex: pNode.pointee.neighborNext)
+            removeNodeFromBin(at: pNode.pointee.neighborNext)
             
             assert(nextNode.neighborPrev == nodeIndex)
             pNode.pointee.neighborNext = nextNode.neighborNext
@@ -195,11 +200,11 @@ public class Allocator {
 
         let combinedNodeIndex = insertNodeIntoBin(size: size, dataOffset: offset)
 
-        if neighborNext != Node.unused {
+        if neighborNext != .max {
             nodes[Int(combinedNodeIndex)].neighborNext = neighborNext
             nodes[Int(neighborNext)].neighborPrev = combinedNodeIndex
         }
-        if neighborPrev != Node.unused {
+        if neighborPrev != .max {
             nodes[Int(combinedNodeIndex)].neighborPrev = neighborPrev
             nodes[Int(neighborPrev)].neighborNext = combinedNodeIndex
         }
@@ -210,7 +215,7 @@ public class Allocator {
         let topBinIndex = binIndex >> topBinsIndexShift
         let leafBinIndex = binIndex & leafBinsIndexMask
         
-        if binIndices[Int(binIndex)] == Node.unused {
+        if binIndices[Int(binIndex)] == .max {
             usedBins[Int(topBinIndex)] |= 1 << leafBinIndex
             usedBinsTop |= 1 << topBinIndex
         }
@@ -221,7 +226,7 @@ public class Allocator {
                 
         nodes[Int(nodeIndex)] = Node(dataOffset: dataOffset, dataSize: size, binListNext: topNodeIndex)
         
-        if topNodeIndex != Node.unused {
+        if topNodeIndex != .max {
             nodes[Int(topNodeIndex)].binListPrev = nodeIndex
         }
         binIndices[Int(binIndex)] = nodeIndex
@@ -231,12 +236,12 @@ public class Allocator {
         return nodeIndex
     }
     
-    private func removeNodeFromBin(nodeIndex: NodeIndex) {
-        let node = nodes[Int(nodeIndex)]
+    private func removeNodeFromBin(at index: NodeIndex) {
+        let node = nodes[Int(index)]
         
-        if node.binListPrev != Node.unused {
+        if node.binListPrev != .max {
             nodes[Int(node.binListPrev)].binListNext = node.binListNext
-            if node.binListNext != Node.unused {
+            if node.binListNext != .max {
                 nodes[Int(node.binListNext)].binListPrev = node.binListPrev
             }
         } else {
@@ -245,11 +250,11 @@ public class Allocator {
             let leafBinIndex = binIndex & leafBinsIndexMask
             
             binIndices[Int(binIndex)] = node.binListNext
-            if node.binListNext != Node.unused {
-                nodes[Int(node.binListNext)].binListPrev = Node.unused
+            if node.binListNext != .max {
+                nodes[Int(node.binListNext)].binListPrev = .max
             }
 
-            if binIndices[Int(binIndex)] == Node.unused {
+            if binIndices[Int(binIndex)] == .max {
                 usedBins[Int(topBinIndex)] &= ~(1 << leafBinIndex)
                 if usedBins[Int(topBinIndex)] == 0 {
                     usedBinsTop &= ~(1 << topBinIndex)
@@ -258,7 +263,7 @@ public class Allocator {
         }
         
         freeOffset += 1
-        freeNodes[Int(freeOffset)] = nodeIndex
+        freeNodes[Int(freeOffset)] = index
 
         freeStorage -= node.dataSize
     }
@@ -288,7 +293,7 @@ public class Allocator {
         let regions = (0..<Int(leafBinsCount)).map { i in
             var count: UInt32 = 0
             var nodeIndex = binIndices[i]
-            while nodeIndex != Node.unused {
+            while nodeIndex != .max {
                 nodeIndex = nodes[Int(nodeIndex)].binListNext
                 count += 1
             }
