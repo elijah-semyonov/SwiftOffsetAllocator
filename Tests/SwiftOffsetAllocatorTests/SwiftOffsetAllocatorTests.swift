@@ -59,7 +59,7 @@ class OffsetAllocatorTests: XCTestCase {
     
     func testBasic() {
         let allocator = Allocator(size: 1024 * 1024 * 256)
-        let a = allocator.allocate(size: 1337)
+        let a = allocator.allocate(size: 1337)!
         let offset = a.offset
         XCTAssertEqual(offset, 0)
         allocator.free(allocation: a)
@@ -69,16 +69,16 @@ class OffsetAllocatorTests: XCTestCase {
         let allocator = Allocator(size: 1024 * 1024 * 256)
         
         func testSimple() {
-            let a = allocator.allocate(size: 0)
+            let a = allocator.allocate(size: 0)!
             XCTAssertEqual(a.offset, 0)
             
-            let b = allocator.allocate(size: 1)
+            let b = allocator.allocate(size: 1)!
             XCTAssertEqual(b.offset, 0)
             
-            let c = allocator.allocate(size: 123)
+            let c = allocator.allocate(size: 123)!
             XCTAssertEqual(c.offset, 1)
             
-            let d = allocator.allocate(size: 1234)
+            let d = allocator.allocate(size: 1234)!
             XCTAssertEqual(d.offset, 124)
             
             allocator.free(allocation: a)
@@ -86,61 +86,61 @@ class OffsetAllocatorTests: XCTestCase {
             allocator.free(allocation: c)
             allocator.free(allocation: d)
             
-            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)
+            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)!
             XCTAssertEqual(validateAll.offset, 0)
             allocator.free(allocation: validateAll)
         }
         
         func testMergeTrivial() {
-            let a = allocator.allocate(size: 1337)
+            let a = allocator.allocate(size: 1337)!
             XCTAssertEqual(a.offset, 0)
             allocator.free(allocation: a)
             
-            let b = allocator.allocate(size: 1337)
+            let b = allocator.allocate(size: 1337)!
             XCTAssertEqual(b.offset, 0)
             allocator.free(allocation: b)
             
-            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)
+            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)!
             XCTAssertEqual(validateAll.offset, 0)
             allocator.free(allocation: validateAll)
         }
         
         func testReuseTrivial() {
-            let a = allocator.allocate(size: 1024)
+            let a = allocator.allocate(size: 1024)!
             XCTAssertEqual(a.offset, 0)
             
-            let b = allocator.allocate(size: 3456)
+            let b = allocator.allocate(size: 3456)!
             XCTAssertEqual(b.offset, 1024)
             
             allocator.free(allocation: a)
             
-            let c = allocator.allocate(size: 1024)
+            let c = allocator.allocate(size: 1024)!
             XCTAssertEqual(c.offset, 0)
             
             allocator.free(allocation: c)
             allocator.free(allocation: b)
             
-            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)
+            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)!
             XCTAssertEqual(validateAll.offset, 0)
             allocator.free(allocation: validateAll)
         }
         
         func testReuseComplex() {
-            let a = allocator.allocate(size: 1024)
+            let a = allocator.allocate(size: 1024)!
             XCTAssertEqual(a.offset, 0)
             
-            let b = allocator.allocate(size: 3456)
+            let b = allocator.allocate(size: 3456)!
             XCTAssertEqual(b.offset, 1024)
             
             allocator.free(allocation: a)
             
-            let c = allocator.allocate(size: 2345)
+            let c = allocator.allocate(size: 2345)!
             XCTAssertEqual(c.offset, 1024 + 3456)
             
-            let d = allocator.allocate(size: 456)
+            let d = allocator.allocate(size: 456)!
             XCTAssertEqual(d.offset, 0)
             
-            let e = allocator.allocate(size: 512)
+            let e = allocator.allocate(size: 512)!
             XCTAssertEqual(e.offset, 456)
                         
             let report = allocator.storageReport()
@@ -153,16 +153,16 @@ class OffsetAllocatorTests: XCTestCase {
             allocator.free(allocation: b)
             allocator.free(allocation: e)
             
-            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)
+            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)!
             XCTAssertEqual(validateAll.offset, 0)
             allocator.free(allocation: validateAll)
         }
         
         func testZeroFragmentation() {
-            var allocations = [Allocation](repeating: Allocation(), count: 256)
-            for i in 0..<256 {
-                allocations[i] = allocator.allocate(size: 1024 * 1024)
-                XCTAssertEqual(allocations[i].offset, UInt32(i) * 1024 * 1024)
+            var allocations = (0..<256).map { i in
+                let allocation = allocator.allocate(size: 1024 * 1024)!
+                XCTAssertEqual(allocation.offset, i * 1024 * 1024)
+                return allocation
             }
             
             var report = allocator.storageReport()
@@ -179,16 +179,11 @@ class OffsetAllocatorTests: XCTestCase {
             allocator.free(allocation: allocations[153])
             allocator.free(allocation: allocations[154])
             
-            allocations[243] = allocator.allocate(size: 1024 * 1024)
-            allocations[5] = allocator.allocate(size: 1024 * 1024)
-            allocations[123] = allocator.allocate(size: 1024 * 1024)
-            allocations[95] = allocator.allocate(size: 1024 * 1024)
-            allocations[151] = allocator.allocate(size: 1024 * 1024 * 4)
-            XCTAssertNotEqual(allocations[243].offset, Allocation.NO_SPACE)
-            XCTAssertNotEqual(allocations[5].offset, Allocation.NO_SPACE)
-            XCTAssertNotEqual(allocations[123].offset, Allocation.NO_SPACE)
-            XCTAssertNotEqual(allocations[95].offset, Allocation.NO_SPACE)
-            XCTAssertNotEqual(allocations[151].offset, Allocation.NO_SPACE)
+            allocations[243] = allocator.allocate(size: 1024 * 1024)!
+            allocations[5] = allocator.allocate(size: 1024 * 1024)!
+            allocations[123] = allocator.allocate(size: 1024 * 1024)!
+            allocations[95] = allocator.allocate(size: 1024 * 1024)!
+            allocations[151] = allocator.allocate(size: 1024 * 1024 * 4)!
             
             for i in 0..<256 {
                 if i < 152 || i > 154 {
@@ -200,7 +195,7 @@ class OffsetAllocatorTests: XCTestCase {
             XCTAssertEqual(report.totalFreeSpace, 1024 * 1024 * 256)
             XCTAssertEqual(report.largestFreeRegion, 1024 * 1024 * 256)
             
-            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)
+            let validateAll = allocator.allocate(size: 1024 * 1024 * 256)!
             XCTAssertEqual(validateAll.offset, 0)
             allocator.free(allocation: validateAll)
         }

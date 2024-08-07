@@ -7,22 +7,20 @@
     typealias NodeIndex = UInt32
 #endif
 
-let NUM_TOP_BINS: UInt32 = 32
-let BINS_PER_LEAF: UInt32 = 8
-let TOP_BINS_INDEX_SHIFT: UInt32 = 3
-let LEAF_BINS_INDEX_MASK: UInt32 = 0x7
-let NUM_LEAF_BINS = NUM_TOP_BINS * BINS_PER_LEAF
+let topBinCount: UInt32 = 32
+let binPerLeafCount: UInt32 = 8
+let topBinsIndexShift: UInt32 = 3
+let leafBinsIndexMask: UInt32 = 0x7
+let leafBinsCount = topBinCount * binPerLeafCount
 
-struct Allocation {
-    static let NO_SPACE: UInt32 = 0xffffffff
-    
-    var offset: UInt32 = NO_SPACE
-    var metadata: NodeIndex = NO_SPACE // internal: node index
+public struct Allocation {
+    public let offset: Int
+    let metadata: NodeIndex
 }
 
-struct StorageReport {
-    var totalFreeSpace: UInt32
-    var largestFreeRegion: UInt32
+public struct StorageReport {
+    let totalFreeSpace: UInt32
+    let largestFreeRegion: UInt32
 }
 
 struct StorageReportFull {
@@ -31,7 +29,7 @@ struct StorageReportFull {
         var count: UInt32
     }
     
-    var freeRegions: [Region] = Array(repeating: Region(size: 0, count: 0), count: Int(NUM_LEAF_BINS))
+    var freeRegions: [Region] = Array(repeating: Region(size: 0, count: 0), count: Int(leafBinsCount))
 }
 
 class Allocator {
@@ -52,8 +50,8 @@ class Allocator {
     private var m_freeStorage: UInt32 = 0
 
     private var m_usedBinsTop: UInt32 = 0
-    private var m_usedBins: [UInt8] = Array(repeating: 0, count: Int(NUM_TOP_BINS))
-    private var m_binIndices: [NodeIndex] = Array(repeating: Node.unused, count: Int(NUM_LEAF_BINS))
+    private var m_usedBins: [UInt8] = Array(repeating: 0, count: Int(topBinCount))
+    private var m_binIndices: [NodeIndex] = Array(repeating: Node.unused, count: Int(leafBinsCount))
                 
     private var m_nodes: UnsafeMutablePointer<Node>
     private var m_freeNodes: [NodeIndex] = []
@@ -70,11 +68,11 @@ class Allocator {
         m_usedBinsTop = 0
         m_freeOffset = m_maxAllocs - 1
 
-        for i in 0..<Int(NUM_TOP_BINS) {
+        for i in 0..<Int(topBinCount) {
             m_usedBins[i] = 0
         }
         
-        for i in 0..<Int(NUM_LEAF_BINS) {
+        for i in 0..<Int(leafBinsCount) {
             m_binIndices[i] = Node.unused
         }
         
@@ -88,33 +86,33 @@ class Allocator {
         _ = insertNodeIntoBin(size: m_size, dataOffset: 0)
     }
     
-    func allocate(size: UInt32) -> Allocation {
+    func allocate(size: UInt32) -> Allocation? {
         if m_freeOffset == 0 {
-            return Allocation(offset: Allocation.NO_SPACE, metadata: Allocation.NO_SPACE)
+            return nil
         }
         
         let minBinIndex = SmallFloat.uintToFloatRoundUp(size)
-        let minTopBinIndex = minBinIndex >> TOP_BINS_INDEX_SHIFT
-        let minLeafBinIndex = minBinIndex & LEAF_BINS_INDEX_MASK
+        let minTopBinIndex = minBinIndex >> topBinsIndexShift
+        let minLeafBinIndex = minBinIndex & leafBinsIndexMask
                 
         var topBinIndex = minTopBinIndex
-        var leafBinIndex: UInt32 = Allocation.NO_SPACE
+        var leafBinIndex: UInt32 = .max
         
         if (m_usedBinsTop & (1 << topBinIndex)) != 0 {
             leafBinIndex = findLowestSetBitAfter(bitMask: UInt32(m_usedBins[Int(topBinIndex)]), startBitIndex: minLeafBinIndex)
         }
     
-        if leafBinIndex == Allocation.NO_SPACE {
+        if leafBinIndex == .max {
             topBinIndex = findLowestSetBitAfter(bitMask: m_usedBinsTop, startBitIndex: minTopBinIndex + 1)
             
-            if topBinIndex == Allocation.NO_SPACE {
-                return Allocation(offset: Allocation.NO_SPACE, metadata: Allocation.NO_SPACE)
+            if topBinIndex == .max {
+                return nil
             }
 
             leafBinIndex = tzcnt_nonzero(UInt32(m_usedBins[Int(topBinIndex)]))
         }
         
-        let binIndex = (topBinIndex << TOP_BINS_INDEX_SHIFT) | leafBinIndex
+        let binIndex = (topBinIndex << topBinsIndexShift) | leafBinIndex
         let nodeIndex = m_binIndices[Int(binIndex)]
         
         let pNode = m_nodes.advanced(by: Int(nodeIndex))
@@ -147,12 +145,10 @@ class Allocator {
             pNode.pointee.neighborNext = newNodeIndex
         }
                 
-        return Allocation(offset: pNode.pointee.dataOffset, metadata: nodeIndex)
+        return Allocation(offset: Int(pNode.pointee.dataOffset), metadata: nodeIndex)
     }
     
     func free(allocation: Allocation) {
-        assert(allocation.metadata != Allocation.NO_SPACE)
-        
         let nodeIndex = allocation.metadata
         
         let pNode = m_nodes.advanced(by: Int(nodeIndex))
@@ -160,12 +156,7 @@ class Allocator {
         
         var offset = pNode.pointee.dataOffset
         var size = pNode.pointee.dataSize
-        
-        
-        if (pNode.pointee.neighborPrev != Node.unused) {
-            print("m_nodes[\(pNode.pointee.neighborPrev)].used = \(m_nodes[Int(pNode.pointee.neighborPrev)].used)")
-        }
-              
+                            
         if (pNode.pointee.neighborPrev != Node.unused) && (m_nodes[Int(pNode.pointee.neighborPrev)].used == false) {
             let prevNode = m_nodes[Int(pNode.pointee.neighborPrev)]
             offset = prevNode.dataOffset
@@ -177,7 +168,7 @@ class Allocator {
             pNode.pointee.neighborPrev = prevNode.neighborPrev
         }
         
-        if (pNode.pointee.neighborNext != Node.unused) && (m_nodes[Int(pNode.pointee.neighborNext)].used == false) {            
+        if (pNode.pointee.neighborNext != Node.unused) && (m_nodes[Int(pNode.pointee.neighborNext)].used == false) {
             let nextNode = m_nodes[Int(pNode.pointee.neighborNext)]
             size += nextNode.dataSize
             
@@ -207,8 +198,8 @@ class Allocator {
 
     private func insertNodeIntoBin(size: UInt32, dataOffset: UInt32) -> NodeIndex {
         let binIndex = SmallFloat.uintToFloatRoundDown(size)
-        let topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT
-        let leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK
+        let topBinIndex = binIndex >> topBinsIndexShift
+        let leafBinIndex = binIndex & leafBinsIndexMask
         
         if m_binIndices[Int(binIndex)] == Node.unused {
             m_usedBins[Int(topBinIndex)] |= 1 << leafBinIndex
@@ -241,8 +232,8 @@ class Allocator {
             }
         } else {
             let binIndex = SmallFloat.uintToFloatRoundDown(node.dataSize)
-            let topBinIndex = binIndex >> TOP_BINS_INDEX_SHIFT
-            let leafBinIndex = binIndex & LEAF_BINS_INDEX_MASK
+            let topBinIndex = binIndex >> topBinsIndexShift
+            let leafBinIndex = binIndex & leafBinsIndexMask
             
             m_binIndices[Int(binIndex)] = node.binListNext
             if node.binListNext != Node.unused {
@@ -264,8 +255,6 @@ class Allocator {
     }
 
     func allocationSize(allocation: Allocation) -> UInt32 {
-        if allocation.metadata == Allocation.NO_SPACE { return 0 }
-        
         return m_nodes[Int(allocation.metadata)].dataSize
     }
 
@@ -278,7 +267,7 @@ class Allocator {
             if m_usedBinsTop != 0 {
                 let topBinIndex = 31 - lzcnt_nonzero(m_usedBinsTop)
                 let leafBinIndex = 31 - lzcnt_nonzero(UInt32(m_usedBins[Int(topBinIndex)]))
-                largestFreeRegion = SmallFloat.floatToUint((topBinIndex << TOP_BINS_INDEX_SHIFT) | leafBinIndex)
+                largestFreeRegion = SmallFloat.floatToUint((topBinIndex << topBinsIndexShift) | leafBinIndex)
                 assert(freeStorage >= largestFreeRegion)
             }
         }
@@ -288,7 +277,7 @@ class Allocator {
 
     func storageReportFull() -> StorageReportFull {
         var report = StorageReportFull()
-        for i in 0..<Int(NUM_LEAF_BINS) {
+        for i in 0..<Int(leafBinsCount) {
             var count: UInt32 = 0
             var nodeIndex = m_binIndices[i]
             while nodeIndex != Node.unused {
@@ -322,23 +311,23 @@ func tzcnt_nonzero(_ v: UInt32) -> UInt32 {
 }
 
 enum SmallFloat {
-    static let MANTISSA_BITS: UInt32 = 3
-    static let MANTISSA_VALUE: UInt32 = 1 << MANTISSA_BITS
-    static let MANTISSA_MASK: UInt32 = MANTISSA_VALUE - 1
+    static let mantissaBits: UInt32 = 3
+    static let mantissaValue: UInt32 = 1 << mantissaBits
+    static let mantissaMask: UInt32 = mantissaValue - 1
     
     static func uintToFloatRoundUp(_ size: UInt32) -> UInt32 {
         var exp: UInt32 = 0
         var mantissa: UInt32 = 0
         
-        if size < MANTISSA_VALUE {
+        if size < mantissaValue {
             mantissa = size
         } else {
             let leadingZeros = lzcnt_nonzero(size)
             let highestSetBit = 31 - leadingZeros
             
-            let mantissaStartBit = highestSetBit - MANTISSA_BITS
+            let mantissaStartBit = highestSetBit - mantissaBits
             exp = mantissaStartBit + 1
-            mantissa = (size >> mantissaStartBit) & MANTISSA_MASK
+            mantissa = (size >> mantissaStartBit) & mantissaMask
             
             let lowBitsMask = UInt32((1 << mantissaStartBit) - 1)
             
@@ -347,34 +336,34 @@ enum SmallFloat {
             }
         }
         
-        return (exp << MANTISSA_BITS) + mantissa
+        return (exp << mantissaBits) + mantissa
     }
 
     static func uintToFloatRoundDown(_ size: UInt32) -> UInt32 {
         var exp: UInt32 = 0
         var mantissa: UInt32 = 0
         
-        if size < MANTISSA_VALUE {
+        if size < mantissaValue {
             mantissa = size
         } else {
             let leadingZeros = lzcnt_nonzero(size)
             let highestSetBit = 31 - leadingZeros
             
-            let mantissaStartBit = highestSetBit - MANTISSA_BITS
+            let mantissaStartBit = highestSetBit - mantissaBits
             exp = mantissaStartBit + 1
-            mantissa = (size >> mantissaStartBit) & MANTISSA_MASK
+            mantissa = (size >> mantissaStartBit) & mantissaMask
         }
         
-        return (exp << MANTISSA_BITS) | mantissa
+        return (exp << mantissaBits) | mantissa
     }
 
     static func floatToUint(_ floatValue: UInt32) -> UInt32 {
-        let exponent = floatValue >> MANTISSA_BITS
-        let mantissa = floatValue & MANTISSA_MASK
+        let exponent = floatValue >> mantissaBits
+        let mantissa = floatValue & mantissaMask
         if exponent == 0 {
             return mantissa
         } else {
-            return (mantissa | MANTISSA_VALUE) << (exponent - 1)
+            return (mantissa | mantissaValue) << (exponent - 1)
         }
     }
 }
@@ -383,6 +372,6 @@ func findLowestSetBitAfter(bitMask: UInt32, startBitIndex: UInt32) -> UInt32 {
     let maskBeforeStartIndex = UInt32((1 << startBitIndex) - 1)
     let maskAfterStartIndex = ~maskBeforeStartIndex
     let bitsAfter = bitMask & maskAfterStartIndex
-    if bitsAfter == 0 { return Allocation.NO_SPACE }
+    if bitsAfter == 0 { return .max }
     return tzcnt_nonzero(bitsAfter)
 }
