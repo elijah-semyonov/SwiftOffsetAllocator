@@ -297,7 +297,7 @@ public class Allocator {
         freeStorage -= node.dataSize
     }
 
-    public func allocationSize(allocation: Allocation) -> UInt32 {
+    public func sizeOf(allocation: Allocation) -> UInt32 {
         return nodes[Int(allocation.metadata)].dataSize
     }
 
